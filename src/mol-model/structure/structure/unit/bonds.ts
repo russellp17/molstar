@@ -82,6 +82,29 @@ namespace Bond {
         return loci.bonds.length === 0 ? true : false;
     }
 
+    // export function remapLoci(loci: Loci, structure: Structure): Loci {
+    //     if (structure === loci.structure) return loci;
+
+    //     const bonds: Loci['bonds'][0][] = [];
+    //     loci.bonds.forEach(l => {
+    //         const unitA = structure.unitMap.get(l.aUnit.id);
+    //         if (!unitA) return;
+    //         const unitB = structure.unitMap.get(l.bUnit.id);
+    //         if (!unitB) return;
+
+    //         const elementA = l.aUnit.elements[l.aIndex];
+    //         const indexA = SortedArray.indexOf(unitA.elements, elementA) as StructureElement.UnitIndex | -1;
+    //         if (indexA === -1) return;
+    //         const elementB = l.bUnit.elements[l.bIndex];
+    //         const indexB = SortedArray.indexOf(unitB.elements, elementB) as StructureElement.UnitIndex | -1;
+    //         if (indexB === -1) return;
+
+    //         bonds.push(Location(loci.structure, unitA, indexA, loci.structure, unitB, indexB));
+    //     });
+
+    //     return Loci(structure, bonds);
+    // }
+
     export function remapLoci(loci: Loci, structure: Structure): Loci {
         if (structure === loci.structure) return loci;
 
@@ -90,18 +113,21 @@ namespace Bond {
             const unitA = structure.unitMap.get(l.aUnit.id);
             if (!unitA) return;
             const unitB = structure.unitMap.get(l.bUnit.id);
-            if (!unitB) return;
 
             const elementA = l.aUnit.elements[l.aIndex];
             const indexA = SortedArray.indexOf(unitA.elements, elementA) as StructureElement.UnitIndex | -1;
             if (indexA === -1) return;
             const elementB = l.bUnit.elements[l.bIndex];
-            const indexB = SortedArray.indexOf(unitB.elements, elementB) as StructureElement.UnitIndex | -1;
-            if (indexB === -1) return;
+            const indexB = unitB
+                ? SortedArray.indexOf(unitB.elements, elementB) as StructureElement.UnitIndex | -1
+                : -1;
 
-            bonds.push(Location(loci.structure, unitA, indexA, loci.structure, unitB, indexB));
+            if (!unitB || indexB === -1) {
+                bonds.push(l);
+            } else {
+                bonds.push(Location(structure, unitA, indexA, structure, unitB, indexB));
+            }
         });
-
         return Loci(structure, bonds);
     }
 

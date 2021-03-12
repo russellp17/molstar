@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2018-2020 mol* contributors, licensed under MIT, See LICENSE file for more info.
+ * Copyright (c) 2018-2021 mol* contributors, licensed under MIT, See LICENSE file for more info.
  *
  * @author Alexander Rose <alexander.rose@weirdbyte.de>
  * @author David Sehnal <david.sehnal@gmail.com>
@@ -16,18 +16,103 @@ import { createLinkCylinderImpostors, createLinkCylinderMesh, LinkStyle } from '
 import { UnitsMeshParams, UnitsVisual, UnitsMeshVisual, StructureGroup, UnitsCylindersParams, UnitsCylindersVisual } from '../units-visual';
 import { VisualUpdateState } from '../../util';
 import { BondType } from '../../../mol-model/structure/model/types';
-import { BondCylinderParams, BondIterator, eachIntraBond, getIntraBondLoci, makeIntraBondIgnoreTest } from './util/bond';
+import { BondCylinderParams, BondIterator, eachIntraBond, getIntraBondLoci, getIntraBondIndexMapping, makeIntraBondIgnoreTest } from './util/bond';
 import { Sphere3D } from '../../../mol-math/geometry';
 import { IntAdjacencyGraph } from '../../../mol-math/graph';
 import { WebGLContext } from '../../../mol-gl/webgl/context';
 import { Cylinders } from '../../../mol-geo/geometry/cylinders/cylinders';
+import { SortedArray } from '../../../mol-data/int';
+// import { IntraUnitBonds } from '../../../mol-model/structure/structure/unit/bonds';
 
 // avoiding namespace lookup improved performance in Chrome (Aug 2020)
 const isBondType = BondType.is;
 
+// namespace IntraUnitBondsIncludingParent {
+//     export function get(unit: Unit.Atomic, structure: Structure): { unit: Unit.Atomic, bonds: IntraUnitBonds } {
+
+//         return {} as any;
+//     }
+// }
+
+
+
 function getIntraUnitBondCylinderBuilderProps(unit: Unit.Atomic, structure: Structure, theme: Theme, props: PD.Values<IntraUnitBondCylinderParams>) {
+    let ignore: undefined | ((edgeIndex: number) => boolean);
+    let stub: undefined | ((edgeIndex: number) => boolean);
+    let group: undefined | ((edgeIndex: number) => number);
+    let radius: (edgeIndex: number) => number;
+    let radiusA: (edgeIndex: number) => number;
+    let radiusB: (edgeIndex: number) => number;
+
     const locE = StructureElement.Location.create(structure, unit);
     const locB = Bond.Location(structure, unit, undefined, structure, unit, undefined);
+
+    if (props.includeParent) {
+        const _unit = unit;
+        structure = structure.root;
+        unit = structure.unitMap.get(unit.id) as Unit.Atomic;
+
+        const _ignore = makeIntraBondIgnoreTest(unit, props);
+        ignore = (edgeIndex: number) => {
+            const eI = elements[a[edgeIndex]];
+            return (_ignore && _ignore(edgeIndex)) || !SortedArray.has(_unit.elements, eI);
+        };
+
+        stub = (edgeIndex: number) => {
+            const eA = elements[a[edgeIndex]];
+            const eB = elements[b[edgeIndex]];
+            return SortedArray.has(_unit.elements, eA) && !SortedArray.has(_unit.elements, eB);
+        };
+
+        const { indexFromParent } = getIntraBondIndexMapping(unit, _unit);
+        group = (edgeIndex: number) => indexFromParent.get(edgeIndex)!;
+
+        radius = (edgeIndex: number) => {
+            const idx = indexFromParent.get(edgeIndex)!;
+            if (idx >= _unit.bonds.edgeCount * 2) {
+                return 0.2;
+            }
+            locB.aIndex = _unit.bonds.a[idx];
+            locB.bIndex = _unit.bonds.b[idx];
+            return theme.size.size(locB) * sizeFactor;
+        };
+
+        radiusA = (edgeIndex: number) => {
+            const idx = indexFromParent.get(edgeIndex)!;
+            if (idx >= _unit.bonds.edgeCount * 2) {
+                return 0.2;
+            }
+            locE.element = _unit.elements[_unit.bonds.a[idx]];
+            return theme.size.size(locE) * sizeFactor;
+        };
+
+        radiusB = (edgeIndex: number) => {
+            const idx = indexFromParent.get(edgeIndex)!;
+            if (idx >= _unit.bonds.edgeCount * 2) {
+                return 0.2;
+            }
+            locE.element = _unit.elements[_unit.bonds.b[idx]];
+            return theme.size.size(locE) * sizeFactor;
+        };
+    } else {
+        ignore = makeIntraBondIgnoreTest(unit, props);
+
+        radius = (edgeIndex: number) => {
+            locB.aIndex = a[edgeIndex];
+            locB.bIndex = b[edgeIndex];
+            return theme.size.size(locB) * sizeFactor;
+        };
+
+        radiusA = (edgeIndex: number) => {
+            locE.element = elements[a[edgeIndex]];
+            return theme.size.size(locE) * sizeFactor;
+        };
+
+        radiusB = (edgeIndex: number) => {
+            locE.element = elements[b[edgeIndex]];
+            return theme.size.size(locE) * sizeFactor;
+        };
+    }
 
     const elements = unit.elements;
     const bonds = unit.bonds;
@@ -37,22 +122,6 @@ function getIntraUnitBondCylinderBuilderProps(unit: Unit.Atomic, structure: Stru
 
     const vRef = Vec3(), delta = Vec3();
     const pos = unit.conformation.invariantPosition;
-
-    const radius = (edgeIndex: number) => {
-        locB.aIndex = a[edgeIndex];
-        locB.bIndex = b[edgeIndex];
-        return theme.size.size(locB) * sizeFactor;
-    };
-
-    const radiusA = (edgeIndex: number) => {
-        locE.element = elements[a[edgeIndex]];
-        return theme.size.size(locE) * sizeFactor;
-    };
-
-    const radiusB = (edgeIndex: number) => {
-        locE.element = elements[b[edgeIndex]];
-        return theme.size.size(locE) * sizeFactor;
-    };
 
     return {
         linkCount: edgeCount * 2,
@@ -105,7 +174,9 @@ function getIntraUnitBondCylinderBuilderProps(unit: Unit.Atomic, structure: Stru
         radius: (edgeIndex: number) => {
             return radius(edgeIndex) * sizeAspectRatio;
         },
-        ignore: makeIntraBondIgnoreTest(unit, props)
+        ignore,
+        stub,
+        group
     };
 }
 
@@ -142,6 +213,7 @@ export const IntraUnitBondCylinderParams = {
     sizeFactor: PD.Numeric(0.3, { min: 0, max: 10, step: 0.01 }),
     sizeAspectRatio: PD.Numeric(2 / 3, { min: 0, max: 3, step: 0.01 }),
     tryUseImpostor: PD.Boolean(true),
+    includeParent: PD.Boolean(false),
 };
 export type IntraUnitBondCylinderParams = typeof IntraUnitBondCylinderParams
 
@@ -167,9 +239,17 @@ export function IntraUnitBondCylinderImpostorVisual(materialId: number): UnitsVi
                 newProps.dashCount !== currentProps.dashCount ||
                 newProps.dashScale !== currentProps.dashScale ||
                 newProps.dashCap !== currentProps.dashCap ||
+                newProps.stubCap !== currentProps.stubCap ||
                 !arrayEqual(newProps.includeTypes, currentProps.includeTypes) ||
                 !arrayEqual(newProps.excludeTypes, currentProps.excludeTypes)
             );
+
+            if (newProps.includeParent !== currentProps.includeParent) {
+                state.createGeometry = true;
+                state.updateTransform = true;
+                state.updateColor = true;
+                state.updateSize = true;
+            }
 
             const newUnit = newStructureGroup.group.units[0];
             const currentUnit = currentStructureGroup.group.units[0];
@@ -207,9 +287,17 @@ export function IntraUnitBondCylinderMeshVisual(materialId: number): UnitsVisual
                 newProps.dashCount !== currentProps.dashCount ||
                 newProps.dashScale !== currentProps.dashScale ||
                 newProps.dashCap !== currentProps.dashCap ||
+                newProps.stubCap !== currentProps.stubCap ||
                 !arrayEqual(newProps.includeTypes, currentProps.includeTypes) ||
                 !arrayEqual(newProps.excludeTypes, currentProps.excludeTypes)
             );
+
+            if (newProps.includeParent !== currentProps.includeParent) {
+                state.createGeometry = true;
+                state.updateTransform = true;
+                state.updateColor = true;
+                state.updateSize = true;
+            }
 
             const newUnit = newStructureGroup.group.units[0];
             const currentUnit = currentStructureGroup.group.units[0];

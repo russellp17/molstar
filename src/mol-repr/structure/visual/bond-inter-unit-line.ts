@@ -17,6 +17,7 @@ import { BondType } from '../../../mol-model/structure/model/types';
 import { BondIterator, getInterBondLoci, eachInterBond, BondLineParams, makeInterBondIgnoreTest } from './util/bond';
 import { Lines } from '../../../mol-geo/geometry/lines/lines';
 import { Sphere3D } from '../../../mol-math/geometry';
+import { SortedArray } from '../../../mol-data/int/sorted-array';
 
 const tmpRefPosBondIt = new Bond.ElementBondIterator();
 function setRefPosition(pos: Vec3, structure: Structure, unit: Unit.Atomic, index: StructureElement.UnitIndex) {
@@ -30,6 +31,25 @@ function setRefPosition(pos: Vec3, structure: Structure, unit: Unit.Atomic, inde
 }
 
 function createInterUnitBondLines(ctx: VisualContext, structure: Structure, theme: Theme, props: PD.Values<InterUnitBondLineParams>, lines?: Lines) {
+    let ignore: undefined | ((edgeIndex: number) => boolean);
+
+    if (props.includeParent) {
+        const _structure = structure;
+        structure = structure.root;
+        const _ignore = makeInterBondIgnoreTest(structure, props);
+        ignore = (edgeIndex: number) => {
+            const b = edges[edgeIndex];
+            const _unitA = _structure.unitMap.get(b.unitA);
+            if (!_unitA) return true;
+
+            const unitA = structure.unitMap.get(b.unitA);
+            const eA = unitA.elements[b.indexA];
+            return (_ignore && _ignore(edgeIndex)) || !SortedArray.has(_unitA.elements, eA);
+        };
+    } else {
+        ignore = makeInterBondIgnoreTest(structure, props);
+    }
+
     const bonds = structure.interUnitBonds;
     const { edgeCount, edges } = bonds;
     const { sizeFactor } = props;
@@ -92,7 +112,7 @@ function createInterUnitBondLines(ctx: VisualContext, structure: Structure, them
             const sizeB = theme.size.size(loc);
             return Math.min(sizeA, sizeB) * sizeFactor;
         },
-        ignore: makeInterBondIgnoreTest(structure, props)
+        ignore
     };
 
     const l = createLinkLines(ctx, builderProps, props, lines);
@@ -106,6 +126,7 @@ function createInterUnitBondLines(ctx: VisualContext, structure: Structure, them
 export const InterUnitBondLineParams = {
     ...ComplexLinesParams,
     ...BondLineParams,
+    includeParent: PD.Boolean(false),
 };
 export type InterUnitBondLineParams = typeof InterUnitBondLineParams
 
@@ -126,6 +147,13 @@ export function InterUnitBondLineVisual(materialId: number): ComplexVisual<Inter
                 !arrayEqual(newProps.includeTypes, currentProps.includeTypes) ||
                 !arrayEqual(newProps.excludeTypes, currentProps.excludeTypes)
             );
+
+            if (newProps.includeParent !== currentProps.includeParent) {
+                state.createGeometry = true;
+                state.updateTransform = true;
+                state.updateColor = true;
+                state.updateSize = true;
+            }
         }
     }, materialId);
 }

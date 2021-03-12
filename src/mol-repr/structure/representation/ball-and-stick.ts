@@ -24,6 +24,7 @@ const BallAndStickVisuals = {
 
 export const BallAndStickParams = {
     ...ElementSphereParams,
+    traceOnly: PD.Boolean(false, { isHidden: true }), // not useful here
     ...IntraUnitBondCylinderParams,
     ...InterUnitBondCylinderParams,
     unitKinds: getUnitKindsParam(['atomic']),

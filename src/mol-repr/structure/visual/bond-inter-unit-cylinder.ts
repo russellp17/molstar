@@ -15,10 +15,11 @@ import { createLinkCylinderImpostors, createLinkCylinderMesh, LinkStyle } from '
 import { ComplexMeshParams, ComplexVisual, ComplexMeshVisual, ComplexCylindersParams, ComplexCylindersVisual } from '../complex-visual';
 import { VisualUpdateState } from '../../util';
 import { BondType } from '../../../mol-model/structure/model/types';
-import { BondCylinderParams, BondIterator, getInterBondLoci, eachInterBond, makeInterBondIgnoreTest } from './util/bond';
+import { BondCylinderParams, BondIterator, getInterBondLoci, eachInterBond, makeInterBondIgnoreTest, getInterBondIndexMapping } from './util/bond';
 import { Sphere3D } from '../../../mol-math/geometry';
 import { Cylinders } from '../../../mol-geo/geometry/cylinders/cylinders';
 import { WebGLContext } from '../../../mol-gl/webgl/context';
+import { SortedArray } from '../../../mol-data/int/sorted-array';
 
 const tmpRefPosBondIt = new Bond.ElementBondIterator();
 function setRefPosition(pos: Vec3, structure: Structure, unit: Unit.Atomic, index: StructureElement.UnitIndex) {
@@ -34,6 +35,108 @@ function setRefPosition(pos: Vec3, structure: Structure, unit: Unit.Atomic, inde
 const tmpRef = Vec3();
 
 function getInterUnitBondCylinderBuilderProps(structure: Structure, theme: Theme, props: PD.Values<InterUnitBondCylinderParams>) {
+    let ignore: undefined | ((edgeIndex: number) => boolean);
+    let stub: undefined | ((edgeIndex: number) => boolean);
+    let group: undefined | ((edgeIndex: number) => number);
+    let radius: (edgeIndex: number) => number;
+    let radiusA: (edgeIndex: number) => number;
+    let radiusB: (edgeIndex: number) => number;
+
+    if (props.includeParent) {
+        const _structure = structure;
+        structure = structure.root;
+
+        const _ignore = makeInterBondIgnoreTest(structure, props);
+        ignore = (edgeIndex: number) => {
+            const b = edges[edgeIndex];
+            const _unitA = _structure.unitMap.get(b.unitA);
+            if (!_unitA) return true;
+
+            const unitA = structure.unitMap.get(b.unitA);
+            const eA = unitA.elements[b.indexA];
+            return (_ignore && _ignore(edgeIndex)) || !SortedArray.has(_unitA.elements, eA);
+        };
+
+        stub = (edgeIndex: number) => {
+            const b = edges[edgeIndex];
+            const _unitA = _structure.unitMap.get(b.unitA);
+            const _unitB = _structure.unitMap.get(b.unitB);
+
+            const unitA = structure.unitMap.get(b.unitA);
+            const eA = unitA.elements[b.indexA];
+            const unitB = structure.unitMap.get(b.unitB);
+            const eB = unitB.elements[b.indexB];
+
+            return (
+                _unitA && SortedArray.has(_unitA.elements, eA) &&
+                (!_unitB || !SortedArray.has(_unitB.elements, eB))
+            );
+        };
+
+        const { indexFromParent } = getInterBondIndexMapping(structure, _structure);
+        group = (edgeIndex: number) => indexFromParent.get(edgeIndex)!;
+
+        radius = (edgeIndex: number) => {
+            const idx = indexFromParent.get(edgeIndex)!;
+            // if (idx >= _structure.interUnitBonds.edgeCount) {
+            //     return 0.2;
+            // }
+            const b = edges[edgeIndex];
+            locB.aUnit = structure.unitMap.get(b.unitA);
+            locB.aIndex = b.indexA;
+            locB.bUnit = structure.unitMap.get(b.unitB);
+            locB.bIndex = b.indexB;
+            return theme.size.size(locB) * sizeFactor;
+        };
+
+        radiusA = (edgeIndex: number) => {
+            const idx = indexFromParent.get(edgeIndex)!;
+            if (idx >= _structure.interUnitBonds.edgeCount) {
+                return 0.2;
+            }
+            const b = edges[edgeIndex];
+            locE.unit = structure.unitMap.get(b.unitA);
+            locE.element = locE.unit.elements[b.indexA];
+            return theme.size.size(locE) * sizeFactor;
+        };
+
+        radiusB = (edgeIndex: number) => {
+            const idx = indexFromParent.get(edgeIndex)!;
+            if (idx >= _structure.interUnitBonds.edgeCount) {
+                return 0.2;
+            }
+            const b = edges[edgeIndex];
+            locE.unit = structure.unitMap.get(b.unitB);
+            locE.element = locE.unit.elements[b.indexB];
+            return theme.size.size(locE) * sizeFactor;
+        };
+    } else {
+        ignore = makeInterBondIgnoreTest(structure, props);
+
+        radius = (edgeIndex: number) => {
+            const b = edges[edgeIndex];
+            locB.aUnit = structure.unitMap.get(b.unitA);
+            locB.aIndex = b.indexA;
+            locB.bUnit = structure.unitMap.get(b.unitB);
+            locB.bIndex = b.indexB;
+            return theme.size.size(locB) * sizeFactor;
+        };
+
+        radiusA = (edgeIndex: number) => {
+            const b = edges[edgeIndex];
+            locE.unit = structure.unitMap.get(b.unitA);
+            locE.element = locE.unit.elements[b.indexA];
+            return theme.size.size(locE) * sizeFactor;
+        };
+
+        radiusB = (edgeIndex: number) => {
+            const b = edges[edgeIndex];
+            locE.unit = structure.unitMap.get(b.unitB);
+            locE.element = locE.unit.elements[b.indexB];
+            return theme.size.size(locE) * sizeFactor;
+        };
+    }
+
     const locE = StructureElement.Location.create(structure);
     const locB = Bond.Location(structure, undefined, undefined, structure, undefined, undefined);
 
@@ -42,29 +145,6 @@ function getInterUnitBondCylinderBuilderProps(structure: Structure, theme: Theme
     const { sizeFactor, sizeAspectRatio } = props;
 
     const delta = Vec3();
-
-    const radius = (edgeIndex: number) => {
-        const b = edges[edgeIndex];
-        locB.aUnit = structure.unitMap.get(b.unitA);
-        locB.aIndex = b.indexA;
-        locB.bUnit = structure.unitMap.get(b.unitB);
-        locB.bIndex = b.indexB;
-        return theme.size.size(locB) * sizeFactor;
-    };
-
-    const radiusA = (edgeIndex: number) => {
-        const b = edges[edgeIndex];
-        locE.unit = structure.unitMap.get(b.unitA);
-        locE.element = locE.unit.elements[b.indexA];
-        return theme.size.size(locE) * sizeFactor;
-    };
-
-    const radiusB = (edgeIndex: number) => {
-        const b = edges[edgeIndex];
-        locE.unit = structure.unitMap.get(b.unitB);
-        locE.element = locE.unit.elements[b.indexB];
-        return theme.size.size(locE) * sizeFactor;
-    };
 
     return {
         linkCount: edgeCount,
@@ -123,12 +203,16 @@ function getInterUnitBondCylinderBuilderProps(structure: Structure, theme: Theme
         radius: (edgeIndex: number) => {
             return radius(edgeIndex) * sizeAspectRatio;
         },
-        ignore: makeInterBondIgnoreTest(structure, props)
+        ignore,
+        stub,
+        group
     };
 }
 
 function createInterUnitBondCylinderImpostors(ctx: VisualContext, structure: Structure, theme: Theme, props: PD.Values<InterUnitBondCylinderParams>, cylinders?: Cylinders) {
-    if (!structure.interUnitBonds.edgeCount) return Cylinders.createEmpty(cylinders);
+    if ((props.includeParent && !structure.root.interUnitBonds.edgeCount) ||
+        (!props.includeParent && !structure.interUnitBonds.edgeCount)
+    ) return Cylinders.createEmpty(cylinders);
 
     const builderProps = getInterUnitBondCylinderBuilderProps(structure, theme, props);
     const m = createLinkCylinderImpostors(ctx, builderProps, props, cylinders);
@@ -140,7 +224,9 @@ function createInterUnitBondCylinderImpostors(ctx: VisualContext, structure: Str
 }
 
 function createInterUnitBondCylinderMesh(ctx: VisualContext, structure: Structure, theme: Theme, props: PD.Values<InterUnitBondCylinderParams>, mesh?: Mesh) {
-    if (!structure.interUnitBonds.edgeCount) return Mesh.createEmpty(mesh);
+    if ((props.includeParent && !structure.root.interUnitBonds.edgeCount) ||
+        (!props.includeParent && !structure.interUnitBonds.edgeCount)
+    ) return Mesh.createEmpty(mesh);
 
     const builderProps = getInterUnitBondCylinderBuilderProps(structure, theme, props);
     const m = createLinkCylinderMesh(ctx, builderProps, props, mesh);
@@ -158,6 +244,7 @@ export const InterUnitBondCylinderParams = {
     sizeFactor: PD.Numeric(0.3, { min: 0, max: 10, step: 0.01 }),
     sizeAspectRatio: PD.Numeric(2 / 3, { min: 0, max: 3, step: 0.01 }),
     tryUseImpostor: PD.Boolean(true),
+    includeParent: PD.Boolean(false),
 };
 export type InterUnitBondCylinderParams = typeof InterUnitBondCylinderParams
 
@@ -183,9 +270,17 @@ export function InterUnitBondCylinderImpostorVisual(materialId: number): Complex
                 newProps.dashCount !== currentProps.dashCount ||
                 newProps.dashScale !== currentProps.dashScale ||
                 newProps.dashCap !== currentProps.dashCap ||
+                newProps.stubCap !== currentProps.stubCap ||
                 !arrayEqual(newProps.includeTypes, currentProps.includeTypes) ||
                 !arrayEqual(newProps.excludeTypes, currentProps.excludeTypes)
             );
+
+            if (newProps.includeParent !== currentProps.includeParent) {
+                state.createGeometry = true;
+                state.updateTransform = true;
+                state.updateColor = true;
+                state.updateSize = true;
+            }
         },
         mustRecreate: (structure: Structure, props: PD.Values<InterUnitBondCylinderParams>, webgl?: WebGLContext) => {
             return !props.tryUseImpostor || !webgl;
@@ -212,9 +307,17 @@ export function InterUnitBondCylinderMeshVisual(materialId: number): ComplexVisu
                 newProps.dashCount !== currentProps.dashCount ||
                 newProps.dashScale !== currentProps.dashScale ||
                 newProps.dashCap !== currentProps.dashCap ||
+                newProps.stubCap !== currentProps.stubCap ||
                 !arrayEqual(newProps.includeTypes, currentProps.includeTypes) ||
                 !arrayEqual(newProps.excludeTypes, currentProps.excludeTypes)
             );
+
+            if (newProps.includeParent !== currentProps.includeParent) {
+                state.createGeometry = true;
+                state.updateTransform = true;
+                state.updateColor = true;
+                state.updateSize = true;
+            }
         },
         mustRecreate: (structure: Structure, props: PD.Values<InterUnitBondCylinderParams>, webgl?: WebGLContext) => {
             return props.tryUseImpostor && !!webgl;

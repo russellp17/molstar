@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2020 mol* contributors, licensed under MIT, See LICENSE file for more info.
+ * Copyright (c) 2020-2021 mol* contributors, licensed under MIT, See LICENSE file for more info.
  *
  * @author Alexander Rose <alexander.rose@weirdbyte.de>
  */
@@ -18,12 +18,28 @@ import { BondIterator, BondLineParams, getIntraBondLoci, eachIntraBond, makeIntr
 import { Sphere3D } from '../../../mol-math/geometry';
 import { Lines } from '../../../mol-geo/geometry/lines/lines';
 import { IntAdjacencyGraph } from '../../../mol-math/graph';
+import { SortedArray } from '../../../mol-data/int/sorted-array';
 
 // avoiding namespace lookup improved performance in Chrome (Aug 2020)
 const isBondType = BondType.is;
 
 function createIntraUnitBondLines(ctx: VisualContext, unit: Unit, structure: Structure, theme: Theme, props: PD.Values<IntraUnitBondLineParams>, lines?: Lines) {
     if (!Unit.isAtomic(unit)) return Lines.createEmpty(lines);
+
+    let ignore: undefined | ((edgeIndex: number) => boolean);
+
+    if (props.includeParent) {
+        const _unit = unit;
+        structure = structure.root;
+        unit = structure.unitMap.get(unit.id) as Unit.Atomic;
+        const _ignore = makeIntraBondIgnoreTest(unit, props);
+        ignore = (edgeIndex: number) => {
+            const eI = elements[a[edgeIndex]];
+            return (_ignore && _ignore(edgeIndex)) || !SortedArray.has(_unit.elements, eI);
+        };
+    } else {
+        ignore = makeIntraBondIgnoreTest(unit, props);
+    }
 
     const location = StructureElement.Location.create(structure, unit);
 
@@ -82,7 +98,7 @@ function createIntraUnitBondLines(ctx: VisualContext, unit: Unit, structure: Str
             const sizeB = theme.size.size(location);
             return Math.min(sizeA, sizeB) * sizeFactor;
         },
-        ignore: makeIntraBondIgnoreTest(unit, props)
+        ignore
     };
 
     const l = createLinkLines(ctx, builderProps, props, lines);
@@ -96,6 +112,7 @@ function createIntraUnitBondLines(ctx: VisualContext, unit: Unit, structure: Str
 export const IntraUnitBondLineParams = {
     ...UnitsLinesParams,
     ...BondLineParams,
+    includeParent: PD.Boolean(false),
 };
 export type IntraUnitBondLineParams = typeof IntraUnitBondLineParams
 
@@ -116,6 +133,13 @@ export function IntraUnitBondLineVisual(materialId: number): UnitsVisual<IntraUn
                 !arrayEqual(newProps.includeTypes, currentProps.includeTypes) ||
                 !arrayEqual(newProps.excludeTypes, currentProps.excludeTypes)
             );
+
+            if (newProps.includeParent !== currentProps.includeParent) {
+                state.createGeometry = true;
+                state.updateTransform = true;
+                state.updateColor = true;
+                state.updateSize = true;
+            }
 
             const newUnit = newStructureGroup.group.units[0];
             const currentUnit = currentStructureGroup.group.units[0];
