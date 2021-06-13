@@ -60,10 +60,9 @@ function createPolymerBackboneCylinderImpostor(ctx: VisualContext, unit: Unit, s
     const pB = Vec3();
     const pM = Vec3();
 
-    let i = 0;
     const polymerBackboneIt = PolymerBackboneIterator(structure, unit);
     while (polymerBackboneIt.hasNext) {
-        const { centerA, centerB, moleculeType } = polymerBackboneIt.move();
+        const { centerA, centerB, moleculeType, indexA, indexB } = polymerBackboneIt.move();
         pos(centerA.element, pA);
         pos(centerB.element, pB);
 
@@ -71,10 +70,8 @@ function createPolymerBackboneCylinderImpostor(ctx: VisualContext, unit: Unit, s
         const shift = isNucleicType ? NucleicShift : StandardShift;
 
         v3add(pM, pA, v3scale(pM, v3sub(pM, pB, pA), shift));
-        builder.add(pA[0], pA[1], pA[2], pM[0], pM[1], pM[2], 1, false, false, i);
-        builder.add(pM[0], pM[1], pM[2], pB[0], pB[1], pB[2], 1, false, false, i + 1);
-
-        ++i;
+        builder.add(pA[0], pA[1], pA[2], pM[0], pM[1], pM[2], 1, false, false, indexA);
+        builder.add(pM[0], pM[1], pM[2], pB[0], pB[1], pB[2], 1, false, false, indexB);
     }
 
     const c = builder.getCylinders();
@@ -113,10 +110,9 @@ function createPolymerBackboneCylinderMesh(ctx: VisualContext, unit: Unit, struc
     const pB = Vec3();
     const cylinderProps: CylinderProps = { radiusTop: 1, radiusBottom: 1, radialSegments };
 
-    let i = 0;
     const polymerBackboneIt = PolymerBackboneIterator(structure, unit);
     while (polymerBackboneIt.hasNext) {
-        const { centerA, centerB, moleculeType } = polymerBackboneIt.move();
+        const { centerA, centerB, moleculeType, indexA, indexB } = polymerBackboneIt.move();
         pos(centerA.element, pA);
         pos(centerB.element, pB);
 
@@ -124,14 +120,12 @@ function createPolymerBackboneCylinderMesh(ctx: VisualContext, unit: Unit, struc
         const shift = isNucleicType ? NucleicShift : StandardShift;
 
         cylinderProps.radiusTop = cylinderProps.radiusBottom = theme.size.size(centerA) * sizeFactor;
-        builderState.currentGroup = i;
+        builderState.currentGroup = indexA;
         addCylinder(builderState, pA, pB, shift, cylinderProps);
 
         cylinderProps.radiusTop = cylinderProps.radiusBottom = theme.size.size(centerB) * sizeFactor;
-        builderState.currentGroup += 1;
+        builderState.currentGroup = indexB;
         addCylinder(builderState, pB, pA, 1 - shift, cylinderProps);
-
-        ++i;
     }
 
     const m = MeshBuilder.getMesh(builderState);

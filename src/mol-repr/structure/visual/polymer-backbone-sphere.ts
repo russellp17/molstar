@@ -52,20 +52,17 @@ function createPolymerBackboneSphereImpostor(ctx: VisualContext, unit: Unit, str
     const pA = Vec3();
     const pB = Vec3();
 
-    let i = 0;
     const polymerBackboneIt = PolymerBackboneIterator(structure, unit);
     while (polymerBackboneIt.hasNext) {
-        const { centerA, centerB } = polymerBackboneIt.move();
+        const { centerA, centerB, indexA, indexB, isStart } = polymerBackboneIt.move();
 
-        if (i === 0) {
+        if (isStart) {
             pos(centerA.element, pA);
-            builder.add(pA[0], pA[1], pA[2], i);
+            builder.add(pA[0], pA[1], pA[2], indexA);
         }
 
         pos(centerB.element, pB);
-        builder.add(pB[0], pB[1], pB[2], i + 1);
-
-        ++i;
+        builder.add(pB[0], pB[1], pB[2], indexB);
     }
 
     const s = builder.getSpheres();
@@ -103,22 +100,19 @@ function createPolymerBackboneSphereMesh(ctx: VisualContext, unit: Unit, structu
     const pA = Vec3();
     const pB = Vec3();
 
-    let i = 0;
     const polymerBackboneIt = PolymerBackboneIterator(structure, unit);
     while (polymerBackboneIt.hasNext) {
-        const { centerA, centerB } = polymerBackboneIt.move();
+        const { centerA, centerB, indexA, indexB, isStart } = polymerBackboneIt.move();
 
-        if (i === 0) {
+        if (isStart) {
             pos(centerA.element, pA);
-            builderState.currentGroup = i;
+            builderState.currentGroup = indexA;
             addSphere(builderState, pA, theme.size.size(centerA) * sizeFactor, detail);
         }
 
         pos(centerB.element, pB);
-        builderState.currentGroup += 1;
+        builderState.currentGroup = indexB;
         addSphere(builderState, pB, theme.size.size(centerB) * sizeFactor, detail);
-
-        ++i;
     }
 
     const m = MeshBuilder.getMesh(builderState);

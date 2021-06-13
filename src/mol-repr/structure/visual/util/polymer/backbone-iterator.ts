@@ -25,6 +25,9 @@ interface PolymerBackbonePair {
     centerA: StructureElement.Location
     centerB: StructureElement.Location
     moleculeType: MoleculeType
+    indexA: number
+    indexB: number
+    isStart: boolean
 }
 
 function createPolymerBackbonePair (structure: Structure, unit: Unit) {
@@ -32,6 +35,9 @@ function createPolymerBackbonePair (structure: Structure, unit: Unit) {
         centerA: StructureElement.Location.create(structure, unit),
         centerB: StructureElement.Location.create(structure, unit),
         moleculeType: MoleculeType.Unknown,
+        indexA: 0,
+        indexB: 0,
+        isStart: false
     };
 }
 
@@ -45,6 +51,8 @@ export class AtomicPolymerBackboneIterator implements Iterator<PolymerBackbonePa
     private residueIt: Segmentation.SegmentIterator<ResidueIndex>
     private state: AtomicPolymerBackboneIteratorState = AtomicPolymerBackboneIteratorState.nextPolymer
     private residueSegment: Segmentation.Segment<ResidueIndex>
+    private indexFirst = 0; // to close cyclic polymers
+    private index = -1;
     hasNext: boolean = false;
 
     move() {
@@ -55,6 +63,9 @@ export class AtomicPolymerBackboneIterator implements Iterator<PolymerBackbonePa
                     this.residueSegment = this.residueIt.move();
                     this.value.moleculeType = this.moleculeType[this.residueSegment.index];
                     this.value.centerB.element = this.traceElementIndex[this.residueSegment.index];
+                    this.value.isStart = true;
+                    this.index += 1;
+                    this.indexFirst = this.index;
                     this.state = AtomicPolymerBackboneIteratorState.nextResidue;
                     break;
                 }
@@ -65,6 +76,8 @@ export class AtomicPolymerBackboneIterator implements Iterator<PolymerBackbonePa
             this.residueSegment = this.residueIt.move();
             this.value.centerA.element = this.value.centerB.element;
             this.value.centerB.element = this.traceElementIndex[this.residueSegment.index];
+            this.value.indexA = this.index;
+            this.value.indexB = this.index + 1;
             if (!this.residueIt.hasNext) {
                 if (this.unit.model.atomicRanges.cyclicPolymerMap.has(this.residueSegment.index)) {
                     this.state = AtomicPolymerBackboneIteratorState.cycle;
@@ -77,11 +90,14 @@ export class AtomicPolymerBackboneIterator implements Iterator<PolymerBackbonePa
             const { cyclicPolymerMap } = this.unit.model.atomicRanges;
             this.value.centerA.element = this.value.centerB.element;
             this.value.centerB.element = this.traceElementIndex[cyclicPolymerMap.get(this.residueSegment.index)!];
+            this.value.indexA = this.index;
+            this.value.indexB = this.indexFirst;
             // TODO need to advance to a polymer that has two or more residues (can't assume it has)
             this.state = AtomicPolymerBackboneIteratorState.nextPolymer;
         }
 
         this.hasNext = this.residueIt.hasNext || this.polymerIt.hasNext || this.state === AtomicPolymerBackboneIteratorState.cycle;
+        this.index += 1;
         return this.value;
     }
 
