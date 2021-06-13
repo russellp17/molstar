@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2018-2019 mol* contributors, licensed under MIT, See LICENSE file for more info.
+ * Copyright (c) 2018-2021 mol* contributors, licensed under MIT, See LICENSE file for more info.
  *
  * @author Alexander Rose <alexander.rose@weirdbyte.de>
  */
@@ -112,9 +112,9 @@ function createPolymerTraceMesh(ctx: VisualContext, unit: Unit, structure: Struc
         } else {
             let h0: number, h1: number, h2: number;
             if (isHelix && !v.isCoarseBackbone) {
-                h0 = w0 * aspectRatio;
-                h1 = w1 * aspectRatio;
-                h2 = w2 * aspectRatio;
+                h0 = (v.secStrucFirst && !v.first) ? w0 : w0 * aspectRatio;
+                h1 = (v.secStrucFirst && !v.first) || (v.secStrucLast && ! v.last) ? w1 : w1 * aspectRatio;
+                h2 = (v.secStrucLast && ! v.last) ? w2 : w2 * aspectRatio;
             } else if (isNucleicType && !v.isCoarseBackbone) {
                 h0 = w0 * aspectRatio;
                 h1 = w1 * aspectRatio;

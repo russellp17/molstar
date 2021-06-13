@@ -1,12 +1,12 @@
 /**
- * Copyright (c) 2018-2020 mol* contributors, licensed under MIT, See LICENSE file for more info.
+ * Copyright (c) 2018-2021 mol* contributors, licensed under MIT, See LICENSE file for more info.
  *
  * @author Alexander Rose <alexander.rose@weirdbyte.de>
  */
 
 import { Vec3 } from '../../../../../mol-math/linear-algebra';
 import { NumberArray } from '../../../../../mol-util/type-helpers';
-import { lerp } from '../../../../../mol-math/interpolate';
+import { lerp, smoothstep } from '../../../../../mol-math/interpolate';
 
 // avoiding namespace lookup improved performance in Chrome (Aug 2020)
 const v3fromArray = Vec3.fromArray;
@@ -14,7 +14,6 @@ const v3toArray = Vec3.toArray;
 const v3normalize = Vec3.normalize;
 const v3sub = Vec3.sub;
 const v3spline = Vec3.spline;
-const v3slerp = Vec3.slerp;
 const v3copy = Vec3.copy;
 const v3cross = Vec3.cross;
 const v3orthogonalize = Vec3.orthogonalize;
@@ -92,6 +91,7 @@ const tangentVec = Vec3();
 const normalVec = Vec3();
 const binormalVec = Vec3();
 const prevNormal = Vec3();
+const nextNormal = Vec3();
 const firstTangentVec = Vec3();
 const lastTangentVec = Vec3();
 const firstNormalVec = Vec3();
@@ -117,15 +117,36 @@ export function interpolateNormals(state: CurveSegmentState, controls: CurveSegm
     v3copy(prevNormal, firstNormalVec);
 
     for (let i = 0; i < n; ++i) {
-        const t = i === 0 ? 0 : 1 / (n - i);
+        const t = i * 1.0 / n;
 
         v3fromArray(tangentVec, tangentVectors, i * 3);
 
-        v3orthogonalize(normalVec, tangentVec, v3slerp(tmpNormal, prevNormal, lastNormalVec, t));
+        if (i === 0) {
+            v3copy(normalVec, firstNormalVec);
+        } else if (i === n - 1) {
+            v3copy(normalVec, lastNormalVec);
+        } else {
+            Vec3.lerp(normalVec, firstNormalVec, lastNormalVec, smoothstep(0, 1, t));
+            v3normalize(normalVec, normalVec);
+            v3orthogonalize(normalVec, tangentVec, normalVec);
+        }
+        v3orthogonalize(normalVec, tangentVec, normalVec);
+
+        v3toArray(normalVec, normalVectors, i * 3);
+        v3normalize(binormalVec, v3cross(binormalVec, tangentVec, normalVec));
+        v3toArray(binormalVec, binormalVectors, i * 3);
+    }
+
+    for (let i = 1; i < n - 1; ++i) {
+        v3fromArray(prevNormal, normalVectors, (i - 1) * 3);
+        v3fromArray(normalVec, normalVectors, i * 3);
+        v3fromArray(nextNormal, normalVectors, (i + 1) * 3);
+
+        Vec3.scale(tmpNormal, Vec3.add(tmpNormal, prevNormal, Vec3.add(tmpNormal, nextNormal, Vec3.add(tmpNormal, normalVec, normalVec))), 1 / 4);
+        Vec3.copy(normalVec, tmpNormal);
         v3toArray(normalVec, normalVectors, i * 3);
 
-        v3copy(prevNormal, normalVec);
-
+        v3fromArray(tangentVec, tangentVectors, i * 3);
         v3normalize(binormalVec, v3cross(binormalVec, tangentVec, normalVec));
         v3toArray(binormalVec, binormalVectors, i * 3);
     }
@@ -139,11 +160,12 @@ export function interpolateSizes(state: CurveSegmentState, w0: number, w1: numbe
     for (let i = 0; i <= linearSegments; ++i) {
         const t = i * 1.0 / linearSegments;
         if (t < shift1) {
-            widthValues[i] = lerp(w0, w1, t + shift);
-            heightValues[i] = lerp(h0, h1, t + shift);
+            widthValues[i] = lerp(w0, w1, smoothstep(0, 1, t * 2));
+            heightValues[i] = lerp(h0, h1, smoothstep(0, 1, t * 2));
         } else {
-            widthValues[i] = lerp(w1, w2, t - shift1);
-            heightValues[i] = lerp(h1, h2, t - shift1);
+            // TODO smoothing only works well for shift of 0.5
+            widthValues[i] = lerp(w1, w2, smoothstep(0, 1, (t - 0.5) * 2));
+            heightValues[i] = lerp(h1, h2, smoothstep(0, 1, (t - 0.5) * 2));
         }
     }
 }
