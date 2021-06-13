@@ -9,6 +9,7 @@ import { Segmentation } from '../../../../../mol-data/int';
 import { Iterator } from '../../../../../mol-data/iterator';
 import { SortedRanges } from '../../../../../mol-data/int/sorted-ranges';
 import { getPolymerRanges } from '../polymer';
+import { MoleculeType } from '../../../../../mol-model/structure/model/types';
 
 /** Iterates over consecutive pairs of residues/coarse elements in polymers */
 export function PolymerBackboneIterator(structure: Structure, unit: Unit): Iterator<PolymerBackbonePair> {
@@ -23,12 +24,14 @@ export function PolymerBackboneIterator(structure: Structure, unit: Unit): Itera
 interface PolymerBackbonePair {
     centerA: StructureElement.Location
     centerB: StructureElement.Location
+    moleculeType: MoleculeType
 }
 
 function createPolymerBackbonePair (structure: Structure, unit: Unit) {
     return {
         centerA: StructureElement.Location.create(structure, unit),
         centerB: StructureElement.Location.create(structure, unit),
+        moleculeType: MoleculeType.Unknown,
     };
 }
 
@@ -36,6 +39,7 @@ const enum AtomicPolymerBackboneIteratorState { nextPolymer, firstResidue, nextR
 
 export class AtomicPolymerBackboneIterator implements Iterator<PolymerBackbonePair> {
     private traceElementIndex: ArrayLike<ElementIndex>
+    private moleculeType: ArrayLike<MoleculeType>
     private value: PolymerBackbonePair
     private polymerIt: SortedRanges.Iterator<ElementIndex, ResidueIndex>
     private residueIt: Segmentation.SegmentIterator<ResidueIndex>
@@ -49,6 +53,7 @@ export class AtomicPolymerBackboneIterator implements Iterator<PolymerBackbonePa
                 this.residueIt.setSegment(this.polymerIt.move());
                 if (this.residueIt.hasNext) {
                     this.residueSegment = this.residueIt.move();
+                    this.value.moleculeType = this.moleculeType[this.residueSegment.index];
                     this.value.centerB.element = this.traceElementIndex[this.residueSegment.index];
                     this.state = AtomicPolymerBackboneIteratorState.nextResidue;
                     break;
@@ -82,6 +87,7 @@ export class AtomicPolymerBackboneIterator implements Iterator<PolymerBackbonePa
 
     constructor(structure: Structure, private unit: Unit.Atomic) {
         this.traceElementIndex = unit.model.atomicHierarchy.derived.residue.traceElementIndex as ArrayLike<ElementIndex>; // can assume it won't be -1 for polymer residues
+        this.moleculeType = unit.model.atomicHierarchy.derived.residue.moleculeType;
         this.polymerIt = SortedRanges.transientSegments(getPolymerRanges(unit), unit.elements);
         this.residueIt = Segmentation.transientSegments(unit.model.atomicHierarchy.residueAtomSegments, unit.elements);
         this.value = createPolymerBackbonePair(structure, unit);

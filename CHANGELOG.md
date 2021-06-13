@@ -5,6 +5,8 @@ Note that since we don't clearly distinguish between a public and private interf
 
 ## [Unreleased]
 
+- Add backbone representation
+
 ## [v2.0.6] - 2021-06-01
 
 - Add glTF (GLB) and STL support to ``geo-export`` extension.
