@@ -6,13 +6,13 @@
 
 import { ParamDefinition as PD } from '../../../mol-util/param-definition';
 import { VisualContext } from '../../visual';
-import { Unit, Structure } from '../../../mol-model/structure';
+import { Unit, Structure, StructureElement, ElementIndex, ResidueIndex } from '../../../mol-model/structure';
 import { Theme } from '../../../mol-theme/theme';
 import { Mesh } from '../../../mol-geo/geometry/mesh/mesh';
 import { MeshBuilder } from '../../../mol-geo/geometry/mesh/mesh-builder';
 import { Vec3 } from '../../../mol-math/linear-algebra';
 import { CylinderProps } from '../../../mol-geo/primitive/cylinder';
-import { eachPolymerElement, getPolymerElementLoci, NucleicShift, PolymerBackboneIterator, PolymerLocationIterator, StandardShift } from './util/polymer';
+import { eachPolymerElement, getPolymerElementLoci, getPolymerRanges, NucleicShift, PolymerLocationIterator, StandardShift } from './util/polymer';
 import { addCylinder } from '../../../mol-geo/geometry/mesh/builder/cylinder';
 import { UnitsMeshParams, UnitsVisual, UnitsMeshVisual, UnitsCylindersVisual, UnitsCylindersParams, StructureGroup } from '../units-visual';
 import { VisualUpdateState } from '../../util';
@@ -22,6 +22,8 @@ import { isNucleic } from '../../../mol-model/structure/model/types';
 import { WebGLContext } from '../../../mol-gl/webgl/context';
 import { Cylinders } from '../../../mol-geo/geometry/cylinders/cylinders';
 import { CylindersBuilder } from '../../../mol-geo/geometry/cylinders/cylinders-builder';
+import { SortedRanges } from '../../../mol-data/int/sorted-ranges';
+import { Segmentation } from '../../../mol-data/int';
 
 // avoiding namespace lookup improved performance in Chrome (Aug 2020)
 const v3scale = Vec3.scale;
@@ -60,18 +62,58 @@ function createPolymerBackboneCylinderImpostor(ctx: VisualContext, unit: Unit, s
     const pB = Vec3();
     const pM = Vec3();
 
-    const polymerBackboneIt = PolymerBackboneIterator(structure, unit);
-    while (polymerBackboneIt.hasNext) {
-        const { centerA, centerB, moleculeType, indexA, indexB } = polymerBackboneIt.move();
-        pos(centerA.element, pA);
-        pos(centerB.element, pB);
+    let indexA = -1 as ResidueIndex;
+    let indexB = -1 as ResidueIndex;
 
-        const isNucleicType = isNucleic(moleculeType);
+    const traceElementIndex = unit.model.atomicHierarchy.derived.residue.traceElementIndex as ArrayLike<ElementIndex>; // can assume it won't be -1 for polymer residues
+    const { moleculeType } = unit.model.atomicHierarchy.derived.residue;
+    const { cyclicPolymerMap } = unit.model.atomicRanges;
+    const polymerIt = SortedRanges.transientSegments(getPolymerRanges(unit), unit.elements);
+    const residueIt = Segmentation.transientSegments(unit.model.atomicHierarchy.residueAtomSegments, unit.elements);
+
+    const add = function(groupA: number, groupB: number) {
+        pos(traceElementIndex[indexA], pA);
+        pos(traceElementIndex[indexB], pB);
+
+        const isNucleicType = isNucleic(moleculeType[indexA]);
         const shift = isNucleicType ? NucleicShift : StandardShift;
 
         v3add(pM, pA, v3scale(pM, v3sub(pM, pB, pA), shift));
-        builder.add(pA[0], pA[1], pA[2], pM[0], pM[1], pM[2], 1, false, false, indexA);
-        builder.add(pM[0], pM[1], pM[2], pB[0], pB[1], pB[2], 1, false, false, indexB);
+        builder.add(pA[0], pA[1], pA[2], pM[0], pM[1], pM[2], 1, false, false, groupA);
+        builder.add(pM[0], pM[1], pM[2], pB[0], pB[1], pB[2], 1, false, false, groupB);
+    };
+
+    let isFirst = true;
+    let firstGroup = -1;
+
+    let i = 0;
+    while (polymerIt.hasNext) {
+        isFirst = true;
+        firstGroup = i;
+        residueIt.setSegment(polymerIt.move());
+        while (residueIt.hasNext) {
+            if (isFirst) {
+                const { index } = residueIt.move();
+                ++i;
+                if (!residueIt.hasNext) continue;
+
+                isFirst = false;
+                indexB = index;
+            }
+            const { index } = residueIt.move();
+            indexA = indexB;
+            indexB = index;
+
+            add(i - 1, i);
+            ++i;
+        }
+
+        if (cyclicPolymerMap.has(indexB)) {
+            indexA = indexB;
+            indexB = cyclicPolymerMap.get(indexA)!;
+
+            add(i - 1, firstGroup);
+        }
     }
 
     const c = builder.getCylinders();
@@ -110,22 +152,67 @@ function createPolymerBackboneCylinderMesh(ctx: VisualContext, unit: Unit, struc
     const pB = Vec3();
     const cylinderProps: CylinderProps = { radiusTop: 1, radiusBottom: 1, radialSegments };
 
-    const polymerBackboneIt = PolymerBackboneIterator(structure, unit);
-    while (polymerBackboneIt.hasNext) {
-        const { centerA, centerB, moleculeType, indexA, indexB } = polymerBackboneIt.move();
+    let indexA = -1 as ResidueIndex;
+    let indexB = -1 as ResidueIndex;
+    const centerA = StructureElement.Location.create(structure, unit);
+    const centerB = StructureElement.Location.create(structure, unit);
+
+    const traceElementIndex = unit.model.atomicHierarchy.derived.residue.traceElementIndex as ArrayLike<ElementIndex>; // can assume it won't be -1 for polymer residues
+    const { moleculeType } = unit.model.atomicHierarchy.derived.residue;
+    const { cyclicPolymerMap } = unit.model.atomicRanges;
+    const polymerIt = SortedRanges.transientSegments(getPolymerRanges(unit), unit.elements);
+    const residueIt = Segmentation.transientSegments(unit.model.atomicHierarchy.residueAtomSegments, unit.elements);
+
+    const add = function(groupA: number, groupB: number) {
+        centerA.element = traceElementIndex[indexA];
+        centerB.element = traceElementIndex[indexB];
+
         pos(centerA.element, pA);
         pos(centerB.element, pB);
 
-        const isNucleicType = isNucleic(moleculeType);
+        const isNucleicType = isNucleic(moleculeType[indexA]);
         const shift = isNucleicType ? NucleicShift : StandardShift;
 
         cylinderProps.radiusTop = cylinderProps.radiusBottom = theme.size.size(centerA) * sizeFactor;
-        builderState.currentGroup = indexA;
+        builderState.currentGroup = groupA;
         addCylinder(builderState, pA, pB, shift, cylinderProps);
 
         cylinderProps.radiusTop = cylinderProps.radiusBottom = theme.size.size(centerB) * sizeFactor;
-        builderState.currentGroup = indexB;
+        builderState.currentGroup = groupB;
         addCylinder(builderState, pB, pA, 1 - shift, cylinderProps);
+    };
+
+    let isFirst = true;
+    let firstGroup = -1;
+
+    let i = 0;
+    while (polymerIt.hasNext) {
+        isFirst = true;
+        firstGroup = i;
+        residueIt.setSegment(polymerIt.move());
+        while (residueIt.hasNext) {
+            if (isFirst) {
+                const { index } = residueIt.move();
+                ++i;
+                if (!residueIt.hasNext) continue;
+
+                isFirst = false;
+                indexB = index;
+            }
+            const { index } = residueIt.move();
+            indexA = indexB;
+            indexB = index;
+
+            add(i - 1, i);
+            ++i;
+        }
+
+        if (cyclicPolymerMap.has(indexB)) {
+            indexA = indexB;
+            indexB = cyclicPolymerMap.get(indexA)!;
+
+            add(i - 1, firstGroup);
+        }
     }
 
     const m = MeshBuilder.getMesh(builderState);

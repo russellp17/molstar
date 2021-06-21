@@ -6,12 +6,12 @@
 
 import { ParamDefinition as PD } from '../../../mol-util/param-definition';
 import { VisualContext } from '../../visual';
-import { Unit, Structure } from '../../../mol-model/structure';
+import { Unit, Structure, ElementIndex, StructureElement } from '../../../mol-model/structure';
 import { Theme } from '../../../mol-theme/theme';
 import { Mesh } from '../../../mol-geo/geometry/mesh/mesh';
 import { MeshBuilder } from '../../../mol-geo/geometry/mesh/mesh-builder';
 import { Vec3 } from '../../../mol-math/linear-algebra';
-import { eachPolymerElement, getPolymerElementLoci, PolymerBackboneIterator, PolymerLocationIterator } from './util/polymer';
+import { eachPolymerElement, getPolymerElementLoci, getPolymerRanges, PolymerLocationIterator } from './util/polymer';
 import { UnitsMeshParams, UnitsVisual, UnitsMeshVisual, UnitsSpheresVisual, UnitsSpheresParams, StructureGroup } from '../units-visual';
 import { VisualUpdateState } from '../../util';
 import { BaseGeometry } from '../../../mol-geo/geometry/base';
@@ -21,6 +21,8 @@ import { sphereVertexCount } from '../../../mol-geo/primitive/sphere';
 import { WebGLContext } from '../../../mol-gl/webgl/context';
 import { Spheres } from '../../../mol-geo/geometry/spheres/spheres';
 import { SpheresBuilder } from '../../../mol-geo/geometry/spheres/spheres-builder';
+import { SortedRanges } from '../../../mol-data/int/sorted-ranges';
+import { Segmentation } from '../../../mol-data/int';
 
 export const PolymerBackboneSphereParams = {
     ...UnitsMeshParams,
@@ -49,20 +51,21 @@ function createPolymerBackboneSphereImpostor(ctx: VisualContext, unit: Unit, str
     const builder = SpheresBuilder.create(polymerElementCount, polymerElementCount / 2, spheres);
 
     const pos = unit.conformation.invariantPosition;
-    const pA = Vec3();
-    const pB = Vec3();
+    const p = Vec3();
 
-    const polymerBackboneIt = PolymerBackboneIterator(structure, unit);
-    while (polymerBackboneIt.hasNext) {
-        const { centerA, centerB, indexA, indexB, isStart } = polymerBackboneIt.move();
+    const traceElementIndex = unit.model.atomicHierarchy.derived.residue.traceElementIndex as ArrayLike<ElementIndex>; // can assume it won't be -1 for polymer residues
+    const polymerIt = SortedRanges.transientSegments(getPolymerRanges(unit), unit.elements);
+    const residueIt = Segmentation.transientSegments(unit.model.atomicHierarchy.residueAtomSegments, unit.elements);
 
-        if (isStart) {
-            pos(centerA.element, pA);
-            builder.add(pA[0], pA[1], pA[2], indexA);
+    let i = 0;
+    while (polymerIt.hasNext) {
+        residueIt.setSegment(polymerIt.move());
+        while (residueIt.hasNext) {
+            const { index } = residueIt.move();
+            pos(traceElementIndex[index], p);
+            builder.add(p[0], p[1], p[2], i);
+            ++i;
         }
-
-        pos(centerB.element, pB);
-        builder.add(pB[0], pB[1], pB[2], indexB);
     }
 
     const s = builder.getSpheres();
@@ -88,6 +91,7 @@ export function PolymerBackboneSphereImpostorVisual(materialId: number): UnitsVi
 }
 
 function createPolymerBackboneSphereMesh(ctx: VisualContext, unit: Unit, structure: Structure, theme: Theme, props: PolymerBackboneSphereProps, mesh?: Mesh) {
+    console.log('createPolymerBackboneSphereMesh 22');
     const polymerElementCount = unit.polymerElements.length;
     if (!polymerElementCount) return Mesh.createEmpty(mesh);
 
@@ -97,22 +101,24 @@ function createPolymerBackboneSphereMesh(ctx: VisualContext, unit: Unit, structu
     const builderState = MeshBuilder.createState(vertexCount, vertexCount / 2, mesh);
 
     const pos = unit.conformation.invariantPosition;
-    const pA = Vec3();
-    const pB = Vec3();
+    const p = Vec3();
+    const center = StructureElement.Location.create(structure, unit);
 
-    const polymerBackboneIt = PolymerBackboneIterator(structure, unit);
-    while (polymerBackboneIt.hasNext) {
-        const { centerA, centerB, indexA, indexB, isStart } = polymerBackboneIt.move();
+    const traceElementIndex = unit.model.atomicHierarchy.derived.residue.traceElementIndex as ArrayLike<ElementIndex>; // can assume it won't be -1 for polymer residues
+    const polymerIt = SortedRanges.transientSegments(getPolymerRanges(unit), unit.elements);
+    const residueIt = Segmentation.transientSegments(unit.model.atomicHierarchy.residueAtomSegments, unit.elements);
 
-        if (isStart) {
-            pos(centerA.element, pA);
-            builderState.currentGroup = indexA;
-            addSphere(builderState, pA, theme.size.size(centerA) * sizeFactor, detail);
+    let i = 0;
+    while (polymerIt.hasNext) {
+        residueIt.setSegment(polymerIt.move());
+        while (residueIt.hasNext) {
+            const { index } = residueIt.move();
+            center.element = traceElementIndex[index];
+            pos(center.element, p);
+            builderState.currentGroup = i;
+            addSphere(builderState, p, theme.size.size(center) * sizeFactor, detail);
+            ++i;
         }
-
-        pos(centerB.element, pB);
-        builderState.currentGroup = indexB;
-        addSphere(builderState, pB, theme.size.size(centerB) * sizeFactor, detail);
     }
 
     const m = MeshBuilder.getMesh(builderState);

@@ -12,21 +12,31 @@ import { Representation, RepresentationContext, RepresentationParamsGetter } fro
 import { ThemeRegistryContext } from '../../../mol-theme/theme';
 import { Structure } from '../../../mol-model/structure';
 import { PolymerBackboneSphereParams, PolymerBackboneSphereVisual } from '../visual/polymer-backbone-sphere';
+import { PolymerGapParams, PolymerGapVisual } from '../visual/polymer-gap-cylinder';
 
 const BackboneVisuals = {
     'polymer-backbone-cylinder': (ctx: RepresentationContext, getParams: RepresentationParamsGetter<Structure, PolymerBackboneCylinderParams>) => UnitsRepresentation('Polymer backbone cylinder', ctx, getParams, PolymerBackboneCylinderVisual),
     'polymer-backbone-sphere': (ctx: RepresentationContext, getParams: RepresentationParamsGetter<Structure, PolymerBackboneSphereParams>) => UnitsRepresentation('Polymer backbone sphere', ctx, getParams, PolymerBackboneSphereVisual),
+    'polymer-gap': (ctx: RepresentationContext, getParams: RepresentationParamsGetter<Structure, PolymerGapParams>) => UnitsRepresentation('Polymer gap cylinder', ctx, getParams, PolymerGapVisual),
 };
 
 export const BackboneParams = {
     ...PolymerBackboneSphereParams,
     ...PolymerBackboneCylinderParams,
+    ...PolymerGapParams,
     sizeAspectRatio: PD.Numeric(1, { min: 0.1, max: 3, step: 0.1 }),
-    visuals: PD.MultiSelect(['polymer-backbone-cylinder', 'polymer-backbone-sphere'], PD.objectToOptions(BackboneVisuals))
+    visuals: PD.MultiSelect(['polymer-backbone-cylinder', 'polymer-backbone-sphere', 'polymer-gap'], PD.objectToOptions(BackboneVisuals))
 };
 export type BackboneParams = typeof BackboneParams
 export function getBackboneParams(ctx: ThemeRegistryContext, structure: Structure) {
-    return PD.clone(BackboneParams);
+    const params = PD.clone(BackboneParams);
+    let hasGaps = false;
+    structure.units.forEach(u => {
+        if (!hasGaps && u.gapElements.length) hasGaps = true;
+    });
+    params.visuals.defaultValue = ['polymer-backbone-cylinder', 'polymer-backbone-sphere'];
+    if (hasGaps) params.visuals.defaultValue.push('polymer-gap');
+    return params;
 }
 
 export type BackboneRepresentation = StructureRepresentation<BackboneParams>
